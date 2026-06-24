@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>오늘 보드</title>
+<style>
+  :root{--bg:#1f2125;--panel:#26282c;--panel2:#2d3035;--line:#3a3d42;
+    --tx:#e6e7e9;--mut:#9aa0a6;--accent:#6ea8fe;--warm:#e3b261;--ok:#7fc8a0}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Apple SD Gothic Neo",sans-serif;
+    background:var(--bg);color:var(--tx);padding:18px;line-height:1.45;-webkit-tap-highlight-color:transparent}
+  .head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.3px}
+  .date{color:var(--mut);font-size:13px}
+  .sync{font-size:11px;color:var(--mut);margin-top:2px}
+  .sync b{color:var(--ok)}
+  .weather{margin:10px 0 18px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:11px 14px;font-size:14px;display:flex;gap:8px;align-items:center}
+  .weather b{color:var(--warm);font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:620px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 15px}
+  .card h2{font-size:13px;color:var(--mut);font-weight:600;text-transform:uppercase;
+    letter-spacing:.5px;margin-bottom:12px;display:flex;justify-content:space-between}
+  .tag{color:var(--accent);font-weight:600}
+  .tl{position:relative;padding-left:16px}
+  .tl::before{content:"";position:absolute;left:4px;top:4px;bottom:4px;width:2px;background:var(--line)}
+  .ev{position:relative;padding:7px 0 7px 4px}
+  .ev::before{content:"";position:absolute;left:-15px;top:12px;width:9px;height:9px;border-radius:50%;
+    background:var(--panel);border:2px solid var(--accent)}
+  .ev.now::before{background:var(--accent);box-shadow:0 0 0 4px rgba(110,168,254,.18)}
+  .ev .t{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .ev .ti{font-size:15px}
+  .ev.now .ti{color:var(--accent);font-weight:600}
+  .empty{color:var(--mut);font-size:14px;padding:6px 4px}
+  .todo{list-style:none}
+  .todo li{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;border-radius:9px;cursor:pointer;transition:background .15s;font-size:15px}
+  .todo li:active{background:var(--panel2)}
+  .box{flex:0 0 20px;width:20px;height:20px;border:2px solid var(--mut);border-radius:6px;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .box svg{width:12px;height:12px;opacity:0;transform:scale(.5);transition:.15s}
+  .todo li.done .box{background:var(--ok);border-color:var(--ok)}
+  .todo li.done .box svg{opacity:1;transform:scale(1)}
+  .todo li.done .txt{color:var(--mut);text-decoration:line-through}
+  .prog{font-size:12px;color:var(--ok);font-weight:600}
+  .pri{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:13px}
+  .chip b{color:var(--warm)}
+  .foot{margin-top:16px;color:var(--mut);font-size:11px;text-align:center}
+  .err{background:#3a2d2d;border:1px solid #5a3d3d;border-radius:10px;padding:10px 13px;font-size:13px;color:#e3b2b2;margin:10px 0}
+</style>
+</head>
+<body>
+<!-- ════════════════════════════════════════════════════════════════
+     데이터 분리형 셸 — 이 파일(board.html)은 한 번만 배포한다.
+     보드 내용은 같은 폴더의 data.json 에서 읽는다.
+     ▶ PC Aria: data.json 만 갈아끼우면 폰에서 자동 반영(앱 복귀/새로고침 시 refetch).
+     ▶ 데이터 위치를 바꾸려면 ?data=https://... 쿼리로 override 가능.
+     ▶ data.json 스키마는 아래 DEFAULT_DATA 와 동일.
+     ════════════════════════════════════════════════════════════════ -->
+<script>
+  // data.json 을 못 읽을 때만 쓰는 폴백(최초 1회용). 실제 내용은 data.json 에서 온다.
+  const DEFAULT_DATA = {
+    date: "데이터 로딩 실패",
+    weatherIcon: "⚠️", weatherCity: "서울", weatherKey: "—",
+    weatherTail: "data.json 을 읽지 못했습니다",
+    events: [], todos: [], priorities: []
+  };
+  const DATA_URL = new URLSearchParams(location.search).get('data') || './data.json';
+</script>
+
+  <div class="head">
+    <div>
+      <h1>오늘 보드</h1>
+      <div class="sync" id="sync"></div>
+    </div>
+    <span class="date" id="date"></span>
+  </div>
+  <div id="errslot"></div>
+  <div class="weather" id="weather"></div>
+  <div class="grid">
+    <div class="card">
+      <h2>오늘 일정 <span class="tag" id="evcount"></span></h2>
+      <div class="tl" id="tl"></div>
+    </div>
+    <div class="card">
+      <h2>할일 <span class="prog" id="prog"></span></h2>
+      <ul class="todo" id="todo"></ul>
+      <div class="pri" id="pri"></div>
+    </div>
+  </div>
+  <div class="foot">탭하면 완료 체크 · 앱 복귀 시 자동 동기화 · 아리아</div>
+
+<script>
+  const CHK='<svg viewBox="0 0 24 24" fill="none" stroke="#1f2125" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
+  const $=id=>document.getElementById(id);
+  let lastSig=null;
+
+  function render(DATA){
+    $('date').textContent=DATA.date||'';
+    $('weather').innerHTML=
+      `${DATA.weatherIcon||''} ${DATA.weatherCity||''} <b>${DATA.weatherKey||''}</b> · ${DATA.weatherTail||''}`;
+    const tl=$('tl'); tl.innerHTML='';
+    const evs=DATA.events||[];
+    $('evcount').textContent=evs.length;
+    if(!evs.length){tl.innerHTML='<div class="empty">오늘 일정 없음</div>';}
+    evs.forEach(e=>{const d=document.createElement('div');d.className='ev'+(e.now?' now':'');
+      d.innerHTML=`<div class="t">${e.t}${e.now?' · 진행중':''}</div><div class="ti">${e.ti}</div>`;tl.appendChild(d);});
+    const todo=$('todo'); todo.innerHTML='';
+    const tds=DATA.todos||[];
+    function refresh(){const done=[...todo.children].filter(l=>l.classList.contains('done')).length;
+      $('prog').textContent=done+'/'+tds.length;}
+    tds.forEach(t=>{const li=document.createElement('li');
+      if(t.done)li.classList.add('done');
+      li.innerHTML=`<span class="box">${CHK}</span><span class="txt">${t.txt}</span>`;
+      li.addEventListener('click',()=>{li.classList.toggle('done');refresh();});todo.appendChild(li);});
+    refresh();
+    const pri=$('pri'); pri.innerHTML='';
+    (DATA.priorities||[]).forEach(p=>{const s=document.createElement('span');s.className='chip';
+      s.innerHTML=`<b>${p.rank}</b> ${p.txt}`;pri.appendChild(s);});
+  }
+
+  function stamp(ok){
+    const t=new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+    $('sync').innerHTML = ok ? `<b>●</b> 동기화 ${t}` : `<span style="color:#e3b2b2">○ 오프라인 · 마지막 ${t}</span>`;
+  }
+
+  async function load(){
+    try{
+      const res=await fetch(DATA_URL+(DATA_URL.includes('?')?'&':'?')+'_t='+Date.now(),{cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const DATA=await res.json();
+      const sig=JSON.stringify(DATA);
+      if(sig!==lastSig){ lastSig=sig; render(DATA); $('errslot').innerHTML=''; }
+      stamp(true);
+    }catch(err){
+      if(lastSig===null){ render(DEFAULT_DATA);
+        $('errslot').innerHTML=`<div class="err">data.json 을 읽지 못했습니다 (${err.message}). 같은 폴더에 data.json 이 있는지, 호스팅이 JSON을 제공하는지 확인하세요.</div>`; }
+      stamp(false);
+    }
+  }
+
+  load();
+  // 앱으로 다시 돌아오거나 새로고침할 때 최신 데이터를 다시 가져온다.
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
+  window.addEventListener('focus', load);
+  // 화면을 켜 둔 채 두는 경우 대비, 5분마다 가볍게 동기화.
+  setInterval(load, 5*60*1000);
+</script>
+</body>
+</html>
