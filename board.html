@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>오늘 보드</title>
 <style>
@@ -26,15 +27,36 @@
   .card h2{font-size:13px;color:var(--mut);font-weight:600;text-transform:uppercase;
     letter-spacing:.5px;margin-bottom:12px;display:flex;justify-content:space-between}
   .tag{color:var(--accent);font-weight:600}
+  /* ── 하루 진행바 ── */
+  .daybar{height:6px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-bottom:6px}
+  .daybar i{display:block;height:100%;width:0;border-radius:6px;
+    background:linear-gradient(90deg,var(--accent),var(--ok));transition:width .6s ease}
+  .daylbl{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);
+    font-variant-numeric:tabular-nums;margin-bottom:14px}
+  .daylbl .now{color:var(--warm);font-weight:700}
+  /* ── 타임라인 ── */
   .tl{position:relative;padding-left:16px}
   .tl::before{content:"";position:absolute;left:4px;top:4px;bottom:4px;width:2px;background:var(--line)}
-  .ev{position:relative;padding:7px 0 7px 4px}
+  .ev{position:relative;padding:7px 0 7px 4px;transition:opacity .3s}
   .ev::before{content:"";position:absolute;left:-15px;top:12px;width:9px;height:9px;border-radius:50%;
-    background:var(--panel);border:2px solid var(--accent)}
-  .ev.now::before{background:var(--accent);box-shadow:0 0 0 4px rgba(110,168,254,.18)}
+    background:var(--panel);border:2px solid var(--accent);transition:.3s}
   .ev .t{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
   .ev .ti{font-size:15px}
-  .ev.now .ti{color:var(--accent);font-weight:600}
+  /* 지나간 일정 */
+  .ev.past{opacity:.45}
+  .ev.past::before{background:var(--ok);border-color:var(--ok)}
+  /* 다음 일정 */
+  .ev.next::before{background:var(--accent);box-shadow:0 0 0 4px rgba(110,168,254,.18)}
+  .ev.next .ti{color:var(--accent);font-weight:600}
+  .ev.next .t::after{content:" · 다음";color:var(--accent)}
+  /* 지금 마커 (시간 따라 이동) */
+  .nowline{position:relative;padding:5px 0 5px 4px;margin:1px 0}
+  .nowline::before{content:"";position:absolute;left:-16px;top:50%;transform:translateY(-50%);
+    width:11px;height:11px;border-radius:50%;background:var(--warm);box-shadow:0 0 0 4px rgba(227,178,97,.2)}
+  .nowline::after{content:"";position:absolute;left:-5px;right:0;top:50%;height:2px;
+    background:linear-gradient(90deg,var(--warm),transparent)}
+  .nowline span{position:relative;font-size:12px;color:var(--warm);font-weight:700;
+    font-variant-numeric:tabular-nums;background:var(--panel);padding-right:6px}
   .empty{color:var(--mut);font-size:14px;padding:6px 4px}
   .todo{list-style:none}
   .todo li{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;border-radius:9px;cursor:pointer;transition:background .15s;font-size:15px}
@@ -58,7 +80,8 @@
      보드 내용은 같은 폴더의 data.json 에서 읽는다.
      ▶ PC Aria: data.json 만 갈아끼우면 폰에서 자동 반영(앱 복귀/새로고침 시 refetch).
      ▶ 데이터 위치를 바꾸려면 ?data=https://... 쿼리로 override 가능.
-     ▶ data.json 스키마는 아래 DEFAULT_DATA 와 동일.
+     ▶ 타임라인은 클라이언트 현재시각 기준으로 매분 진행(지난/다음/지금 마커·진행바).
+     ▶ 검증용: ?now=HH:MM 로 현재시각을 강제할 수 있다.
      ════════════════════════════════════════════════════════════════ -->
 <script>
   // data.json 을 못 읽을 때만 쓰는 폴백(최초 1회용). 실제 내용은 data.json 에서 온다.
@@ -69,6 +92,7 @@
     events: [], todos: [], priorities: []
   };
   const DATA_URL = new URLSearchParams(location.search).get('data') || './data.json';
+  const NOW_OVR  = new URLSearchParams(location.search).get('now'); // 검증용 시각 강제
 </script>
 
   <div class="head">
@@ -83,6 +107,8 @@
   <div class="grid">
     <div class="card">
       <h2>오늘 일정 <span class="tag" id="evcount"></span></h2>
+      <div class="daybar"><i id="daybarfill"></i></div>
+      <div class="daylbl"><span id="daystart"></span><span class="now" id="daynow"></span><span id="dayend"></span></div>
       <div class="tl" id="tl"></div>
     </div>
     <div class="card">
@@ -91,12 +117,45 @@
       <div class="pri" id="pri"></div>
     </div>
   </div>
-  <div class="foot">탭하면 완료 체크 · 앱 복귀 시 자동 동기화 · 아리아</div>
+  <div class="foot">탭하면 완료 체크 · 일정은 시각 따라 자동 진행 · 앱 복귀 시 동기화 · 아리아</div>
 
 <script>
   const CHK='<svg viewBox="0 0 24 24" fill="none" stroke="#1f2125" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
   const $=id=>document.getElementById(id);
   let lastSig=null;
+
+  const pmin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0);};
+  const fmt =m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  function nowMin(){
+    if(NOW_OVR){const[h,m]=NOW_OVR.split(':').map(Number);return (h||0)*60+(m||0);}
+    const d=new Date();return d.getHours()*60+d.getMinutes();
+  }
+
+  // 현재시각 기준으로 지난/다음/지금마커·진행바 갱신 (render 후 + 매분 호출)
+  function tick(){
+    const tl=$('tl'); if(!tl) return;
+    tl.querySelectorAll('.nowline').forEach(n=>n.remove());
+    const evs=[...tl.querySelectorAll('.ev')];
+    if(!evs.length){ daybar(null); return; }
+    const nm=nowMin(); let firstFuture=null;
+    evs.forEach(ev=>{const m=+ev.dataset.min; ev.classList.remove('past','next');
+      if(m<=nm) ev.classList.add('past'); else if(!firstFuture) firstFuture=ev;});
+    if(firstFuture) firstFuture.classList.add('next');
+    const nl=document.createElement('div'); nl.className='nowline';
+    nl.innerHTML=`<span>지금 ${fmt(nm)}</span>`;
+    if(firstFuture) tl.insertBefore(nl,firstFuture); else tl.appendChild(nl);
+    daybar(evs.map(e=>+e.dataset.min),nm);
+  }
+  function daybar(mins,nm){
+    if(!mins||!mins.length){$('daybarfill').style.width='0';
+      $('daystart').textContent='';$('daynow').textContent='';$('dayend').textContent='';return;}
+    const a=Math.min(...mins),b=Math.max(...mins);
+    let pct=b>a?(nm-a)/(b-a)*100:(nm>=a?100:0); pct=Math.max(0,Math.min(100,pct));
+    $('daybarfill').style.width=pct+'%';
+    $('daystart').textContent=fmt(a);
+    $('daynow').textContent='지금 '+fmt(nm);
+    $('dayend').textContent=fmt(b);
+  }
 
   function render(DATA){
     $('date').textContent=DATA.date||'';
@@ -105,9 +164,10 @@
     const tl=$('tl'); tl.innerHTML='';
     const evs=DATA.events||[];
     $('evcount').textContent=evs.length;
-    if(!evs.length){tl.innerHTML='<div class="empty">오늘 일정 없음</div>';}
-    evs.forEach(e=>{const d=document.createElement('div');d.className='ev'+(e.now?' now':'');
-      d.innerHTML=`<div class="t">${e.t}${e.now?' · 진행중':''}</div><div class="ti">${e.ti}</div>`;tl.appendChild(d);});
+    if(!evs.length){tl.innerHTML='<div class="empty">오늘 일정 없음</div>';daybar(null);}
+    evs.forEach(e=>{const d=document.createElement('div');d.className='ev';
+      d.dataset.min=pmin(e.t);
+      d.innerHTML=`<div class="t">${e.t}</div><div class="ti">${e.ti}</div>`;tl.appendChild(d);});
     const todo=$('todo'); todo.innerHTML='';
     const tds=DATA.todos||[];
     function refresh(){const done=[...todo.children].filter(l=>l.classList.contains('done')).length;
@@ -120,6 +180,7 @@
     const pri=$('pri'); pri.innerHTML='';
     (DATA.priorities||[]).forEach(p=>{const s=document.createElement('span');s.className='chip';
       s.innerHTML=`<b>${p.rank}</b> ${p.txt}`;pri.appendChild(s);});
+    tick();
   }
 
   function stamp(ok){
@@ -144,10 +205,11 @@
 
   load();
   // 앱으로 다시 돌아오거나 새로고침할 때 최신 데이터를 다시 가져온다.
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
-  window.addEventListener('focus', load);
-  // 화면을 켜 둔 채 두는 경우 대비, 5분마다 가볍게 동기화.
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ load(); tick(); } });
+  window.addEventListener('focus', ()=>{ load(); tick(); });
+  // 화면을 켜 둔 채 두는 경우: 데이터는 5분, 타임라인 진행은 매분 갱신.
   setInterval(load, 5*60*1000);
+  setInterval(tick, 60*1000);
 </script>
 </body>
 </html>
