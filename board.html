@@ -124,6 +124,13 @@
   const $=id=>document.getElementById(id);
   let lastSig=null;
 
+  // ── 완료 체크 영속화 (날짜별 localStorage, 페이지 다시 열어도 유지) ──
+  const DK=d=>'board-done:'+(d||'');
+  function loadDone(d){ try{return new Set(JSON.parse(localStorage.getItem(DK(d))||'[]'))}catch(e){return new Set()} }
+  function saveDone(d,set){ try{localStorage.setItem(DK(d),JSON.stringify([...set]))}catch(e){} }
+  function pruneDone(keep){ try{ for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);
+    if(k&&k.startsWith('board-done:')&&k!==DK(keep)) localStorage.removeItem(k);} }catch(e){} }
+
   const pmin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0);};
   const fmt =m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   function nowMin(){
@@ -170,12 +177,21 @@
       d.innerHTML=`<div class="t">${e.t}</div><div class="ti">${e.ti}</div>`;tl.appendChild(d);});
     const todo=$('todo'); todo.innerHTML='';
     const tds=DATA.todos||[];
+    const dkey=DATA.date||''; pruneDone(dkey);
+    const doneSet=loadDone(dkey);
+    // 오늘 저장기록이 아예 없으면 data.json 의 done:true 를 초기 시드(이후엔 사용자 클릭이 진실)
+    if(localStorage.getItem(DK(dkey))===null){ tds.forEach(t=>{ if(t.done) doneSet.add(t.txt); }); }
     function refresh(){const done=[...todo.children].filter(l=>l.classList.contains('done')).length;
       $('prog').textContent=done+'/'+tds.length;}
     tds.forEach(t=>{const li=document.createElement('li');
-      if(t.done)li.classList.add('done');
+      if(doneSet.has(t.txt))li.classList.add('done');
       li.innerHTML=`<span class="box">${CHK}</span><span class="txt">${t.txt}</span>`;
-      li.addEventListener('click',()=>{li.classList.toggle('done');refresh();});todo.appendChild(li);});
+      li.addEventListener('click',()=>{
+        li.classList.toggle('done');
+        if(li.classList.contains('done')) doneSet.add(t.txt); else doneSet.delete(t.txt);
+        saveDone(dkey,doneSet); refresh();
+      });
+      todo.appendChild(li);});
     refresh();
     const pri=$('pri'); pri.innerHTML='';
     (DATA.priorities||[]).forEach(p=>{const s=document.createElement('span');s.className='chip';
