@@ -74,6 +74,19 @@
   .chip b{color:var(--warm)}
   .foot{margin-top:16px;color:var(--mut);font-size:11px;text-align:center}
   .err{background:#3a2d2d;border:1px solid #5a3d3d;border-radius:10px;padding:10px 13px;font-size:13px;color:#e3b2b2;margin:10px 0}
+  /* ── 로컬 편집 모드 (폰 전용·localStorage) ── */
+  .h2r{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0}
+  .edit-btn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:7px;padding:3px 10px;font-size:12px;cursor:pointer;font-weight:600}
+  .edit-btn.on{color:var(--accent);border-color:var(--accent)}
+  .todo li.editing{cursor:default}
+  .todo li.editing:active{background:none}
+  .todo .etxt{flex:1;outline:none;font-size:15px;border-bottom:1px dashed var(--line);padding-bottom:2px;min-height:20px}
+  .todo .etxt:focus{border-bottom-color:var(--accent)}
+  .todo .del{flex:0 0 auto;color:var(--mut);font-size:20px;line-height:1;padding:0 4px;cursor:pointer}
+  .todo .del:active{color:#e3b2b2}
+  .addrow{display:flex;align-items:center;gap:10px;padding:9px 6px;margin-top:2px;color:var(--accent);font-size:14px;cursor:pointer;border-radius:9px}
+  .addrow:active{background:var(--panel2)}
+  .addrow .plus{flex:0 0 20px;width:20px;height:20px;border:2px dashed var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1}
 </style>
 </head>
 <body>
@@ -114,17 +127,17 @@
       <div class="tl" id="tl"></div>
     </div>
     <div class="card">
-      <h2>할일 <span class="prog" id="prog"></span></h2>
+      <h2><span>할일</span><span class="h2r"><span class="prog" id="prog"></span><button class="edit-btn" id="editbtn" type="button">편집</button></span></h2>
       <ul class="todo" id="todo"></ul>
       <div class="pri" id="pri"></div>
     </div>
   </div>
-  <div class="foot">탭하면 완료 체크 · 일정은 시각 따라 자동 진행 · 앱 복귀 시 동기화 · 아리아</div>
+  <div class="foot">탭=완료 체크 · 편집=할일 글자수정·추가(폰에 저장) · 앱 복귀 시 동기화 · 아리아</div>
 
 <script>
   const CHK='<svg viewBox="0 0 24 24" fill="none" stroke="#1f2125" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
   const $=id=>document.getElementById(id);
-  let lastSig=null;
+  let lastSig=null, editMode=false, curTds=[], curDkey='', curDoneSet=new Set();
 
   // ── 완료 체크 영속화 (날짜별 localStorage, 페이지 다시 열어도 유지) ──
   const DK=d=>'board-done:'+(d||'');
@@ -132,6 +145,13 @@
   function saveDone(d,set){ try{localStorage.setItem(DK(d),JSON.stringify([...set]))}catch(e){} }
   function pruneDone(keep){ try{ for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);
     if(k&&k.startsWith('board-done:')&&k!==DK(keep)) localStorage.removeItem(k);} }catch(e){} }
+
+  // ── 할일 로컬 편집 영속화 (날짜별 override. 있으면 data.json 대신 이 목록을 렌더) ──
+  const TK=d=>'board-todos:'+(d||'');
+  function loadTodos(d){ try{const v=localStorage.getItem(TK(d));return v?JSON.parse(v):null;}catch(e){return null;} }
+  function saveTodos(d,arr){ try{localStorage.setItem(TK(d),JSON.stringify(arr.map(t=>({txt:t.txt}))));}catch(e){} }
+  function pruneTodos(keep){ try{ for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);
+    if(k&&k.startsWith('board-todos:')&&k!==TK(keep)) localStorage.removeItem(k);} }catch(e){} }
 
   const pmin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0);};
   const fmt =m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
@@ -177,28 +197,55 @@
     evs.forEach(e=>{const d=document.createElement('div');d.className='ev';
       d.dataset.min=pmin(e.t);
       d.innerHTML=`<div class="t">${e.t}</div><div class="ti">${e.ti}</div>`;tl.appendChild(d);});
-    const todo=$('todo'); todo.innerHTML='';
-    const tds=DATA.todos||[];
-    const dkey=DATA.date||''; pruneDone(dkey);
+    const dkey=DATA.date||''; pruneDone(dkey); pruneTodos(dkey);
+    const override=loadTodos(dkey);
+    const tds=override||(DATA.todos||[]);
     const doneSet=loadDone(dkey);
-    // 오늘 저장기록이 아예 없으면 data.json 의 done:true 를 초기 시드(이후엔 사용자 클릭이 진실)
-    if(localStorage.getItem(DK(dkey))===null){ tds.forEach(t=>{ if(t.done) doneSet.add(t.txt); }); }
-    function refresh(){const done=[...todo.children].filter(l=>l.classList.contains('done')).length;
-      $('prog').textContent=done+'/'+tds.length;}
-    tds.forEach(t=>{const li=document.createElement('li');
-      if(doneSet.has(t.txt))li.classList.add('done');
-      li.innerHTML=`<span class="box">${CHK}</span><span class="txt">${t.txt}</span>`;
-      li.addEventListener('click',()=>{
-        li.classList.toggle('done');
-        if(li.classList.contains('done')) doneSet.add(t.txt); else doneSet.delete(t.txt);
-        saveDone(dkey,doneSet); refresh();
-      });
-      todo.appendChild(li);});
-    refresh();
+    // 편집 override 없고 저장기록도 없으면 data.json 의 done:true 를 초기 시드(이후엔 사용자 클릭이 진실)
+    if(!override && localStorage.getItem(DK(dkey))===null){ tds.forEach(t=>{ if(t.done) doneSet.add(t.txt); }); }
+    curDkey=dkey; curTds=tds; curDoneSet=doneSet;
+    buildTodos();
     const pri=$('pri'); pri.innerHTML='';
     (DATA.priorities||[]).forEach(p=>{const s=document.createElement('span');s.className='chip';
       s.innerHTML=`<b>${p.rank}</b> ${p.txt}`;pri.appendChild(s);});
     tick();
+  }
+
+  // 할일 목록 렌더 (편집모드면 편집 UI, 아니면 체크박스). render()·편집토글서 호출.
+  function buildTodos(){
+    const todo=$('todo'); if(!todo) return; todo.innerHTML='';
+    const prog=()=>{ const done=curTds.filter(t=>curDoneSet.has(t.txt)).length; $('prog').textContent=done+'/'+curTds.length; };
+    curTds.forEach((t,idx)=>{
+      const li=document.createElement('li');
+      if(editMode){
+        li.className='editing';
+        const etxt=document.createElement('span'); etxt.className='etxt'; etxt.contentEditable='true'; etxt.textContent=t.txt;
+        etxt.addEventListener('blur',()=>{ const nv=etxt.textContent.replace(/\s+/g,' ').trim();
+          if(nv && nv!==t.txt){ if(curDoneSet.has(t.txt)){curDoneSet.delete(t.txt);curDoneSet.add(nv);saveDone(curDkey,curDoneSet);}
+            t.txt=nv; saveTodos(curDkey,curTds); }
+          else if(!nv){ etxt.textContent=t.txt; } });
+        etxt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); etxt.blur(); } });
+        const del=document.createElement('span'); del.className='del'; del.textContent='×';
+        del.addEventListener('click',()=>{ curTds.splice(idx,1); curDoneSet.delete(t.txt); saveDone(curDkey,curDoneSet); saveTodos(curDkey,curTds); buildTodos(); });
+        li.appendChild(etxt); li.appendChild(del);
+      } else {
+        if(curDoneSet.has(t.txt))li.classList.add('done');
+        li.innerHTML=`<span class="box">${CHK}</span><span class="txt">${t.txt}</span>`;
+        li.addEventListener('click',()=>{ li.classList.toggle('done');
+          if(li.classList.contains('done')) curDoneSet.add(t.txt); else curDoneSet.delete(t.txt);
+          saveDone(curDkey,curDoneSet); prog(); });
+      }
+      todo.appendChild(li);
+    });
+    if(editMode){
+      const add=document.createElement('div'); add.className='addrow';
+      add.innerHTML='<span class="plus">+</span><span>항목 추가</span>';
+      add.addEventListener('click',()=>{ curTds.push({txt:'새 할일'}); saveTodos(curDkey,curTds); buildTodos();
+        const items=$('todo').querySelectorAll('.etxt'); const last=items[items.length-1];
+        if(last){ last.focus(); try{document.getSelection().selectAllChildren(last);}catch(e){} } });
+      todo.appendChild(add);
+    }
+    prog();
   }
 
   function stamp(ok){
@@ -222,6 +269,11 @@
   }
 
   load();
+  // 편집 토글: 폰에서 할일 글자수정·추가·삭제(날짜별 localStorage, PC엔 안 감)
+  $('editbtn').addEventListener('click',()=>{ editMode=!editMode;
+    $('editbtn').classList.toggle('on',editMode);
+    $('editbtn').textContent=editMode?'완료':'편집';
+    buildTodos(); });
   // 앱으로 다시 돌아오거나 새로고침할 때 최신 데이터를 다시 가져온다.
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ load(); tick(); } });
   window.addEventListener('focus', ()=>{ load(); tick(); });
